@@ -18,11 +18,13 @@ from app.graph_client import GraphClient
 from app.email_parser import parse_email_notification
 from app.scheduler import handle_scheduling_request
 from app.ai_extractor import extract_scheduling_intent
+from app.gmail_webhook import router as gmail_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Email AI Assistant")
+app.include_router(gmail_router)
 
 graph = GraphClient(
     tenant_id=os.environ["AZURE_TENANT_ID"],
