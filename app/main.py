@@ -17,6 +17,7 @@ import httpx
 from app.graph_client import GraphClient
 from app.email_parser import parse_email_notification
 from app.scheduler import handle_scheduling_request
+from app.ai_extractor import extract_scheduling_intent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,32 +83,19 @@ async def process_email(email: dict):
     parsed = parse_email_notification(email)
     logger.info(f"Processing email from {parsed['from']} | subject: {parsed['subject']}")
 
-    intent = detect_intent(parsed)
+    # Use Claude to extract intent and details
+    extracted = await extract_scheduling_intent(parsed)
+    intent = extracted.get("intent", "none")
     logger.info(f"Detected intent: {intent}")
 
     if intent == "schedule":
         await handle_scheduling_request(graph, parsed)
     elif intent == "reschedule":
         await handle_scheduling_request(graph, parsed, reschedule=True)
+    elif intent == "cancel":
+        logger.info("Cancel intent detected — not yet implemented")
     else:
         logger.info("No actionable intent detected — no action taken")
-
-
-def detect_intent(parsed: dict) -> str:
-    """
-    Naive keyword-based intent detection.
-    Replace with an LLM call (Claude API) for production.
-    """
-    body = (parsed.get("body", "") + " " + parsed.get("subject", "")).lower()
-
-    schedule_keywords = ["schedule", "book", "set up a meeting", "find a time", "calendar invite"]
-    reschedule_keywords = ["reschedule", "move the meeting", "change the time", "postpone"]
-
-    if any(k in body for k in reschedule_keywords):
-        return "reschedule"
-    if any(k in body for k in schedule_keywords):
-        return "schedule"
-    return "unknown"
 
 
 # ── Subscription management ────────────────────────────────────────────────────
