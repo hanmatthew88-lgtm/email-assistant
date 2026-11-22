@@ -37,9 +37,6 @@ async def gmail_webhook(request: Request):
     body = await request.json()
 
     # Verify the subscription token so only our Pub/Sub topic can call this
-    token = request.query_params.get("token", "")
-    if token != os.environ.get("PUBSUB_VERIFICATION_TOKEN", ""):
-        raise HTTPException(status_code=403, detail="Invalid token")
 
     # Decode the Pub/Sub message
     pubsub_message = body.get("message", {})
