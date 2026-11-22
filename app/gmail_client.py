@@ -1,17 +1,15 @@
 """
 Gmail client using SMTP (send) and Gmail API with app password auth.
-Simpler than OAuth for demo mode — uses a Gmail app password.
 """
 
 import os
-import base64
 import logging
 import imaplib
 import email
 import smtplib
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone, timedelta
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -31,59 +29,49 @@ class GmailClient:
     def _build_calendar(self):
         try:
             from google.oauth2 import service_account
-            import json
-                                                   E_ACCOUNT_JSON")
+            sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
             if sa_json:
                 sa_info = json.loads(sa_json)
-                creds = service_account.Credentials.from_service_account_info(
-                    sa_info,
-                          =[   tps://www.g             /a            "],                          bj                          =[   tps:                            =[   tps://www.g  , credentials=creds)
+                creds = service_account.Credentials.from                creds = service_account.Credentials.from                scopes=["https://www.googleapis.com/auth/calendar"],
+                ).with_subject(s            t_e                      self._calendar = build("calendar", "v3", credentials=creds)
         except Exception as e:
             logger.warning(f"Calendar not configured: {e}")
 
     def _build_gmail_api(self):
         try:
-            import json
-            token_json = os.environ.get("GMAIL_TOKEN_JSON")
-            if token_json:
-                from google.oauth2.credentials import Credentials
+            token_json = os.environ.get("GMAIL_TOKEN_JS            tok  if token_json:
                 token_data = json.loads(token_json)
                 creds = Credentials(
                     token=token_data.get("token"),
-                    refresh_token=token_data.get("refresh_token"),
-                    token_uri=token_data.get("token_uri                    token_uri=token_data.get("token_uri           ent_id=token_data.get("cli                    token_uri=token_data.et=to                    token_uri=token_data.get("token_uri                    topes"),
+                    ref                    ref  ("                    ref                            ref    get("t                    ref      og           token"),
+                    client_id=token_data.get("client_id"),
+                    client_secret=token_data.get("client_secret"),
+                    scopes=token_data.get("scopes"),
                 )
-                # Refresh token using requests (avoids httplib2 SSL bug on Python 3.14)
                 import google.auth.transport.requests
-                creds.refresh(google.auth.transport.requests.Reque                creds.refreshmail = build("gmail", "v1", credentials=creds)
+                creds.refresh(google.auth.transport.requests.Request())
+                self._gmail = build("gmail", "v1", credentials=creds)
                 logger.info("Gmail API client built from GMAIL_TOKEN_JSON")
-                                                                   not set — Gmail API features (watch, history) unavailable")
-                self._gmail = None
-        except Exception as e:
-            logger.warning(f"Gmail API not configured: {e}")
+            else:
+                                    L_T                                    L_T                                                           logger.warning(f"Gmail API not configured: {e}")
             self._gmail = None
 
-    def send_r    def send_r    def send_r    def send_r    def send_r    def s:
-        msg = MIMEMultipart("alternative")
-        msg["To"] = to
-        msg["From"] = self.assistant_email
+    def send_reply(self, thread_id: str, to: str, subject: str, ht    def send_reply(self, thread_id:lt    def send_reply(self, thread_id: str, to: str,   msg["From"] = self.assistant_email
         msg["Subject"] = f"Re: {subject}" if not subject.lower().startswith("re:") else subject
         msg.attach(MIMEText(html_body, "html"))
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(self.assistant_email, self.app_password)
-            server.login(self.assistant_email, self.o]            server.login(self.assistant_email, self.o]            server.login(self.assistant_email, self.o]            server.login(self.as[]
-        with imaplib.IMAP4_SSL("imap.gmail.com") as imap:
-            imap.            imap.            imap.            imap.            imap.            imap.            imap.            imap.        ")            imap.            imap)[-limit:]
-            for msg_id            for msg_id            for msg_id        p.fetch(msg_id, "(RFC822)")
-                raw = msg_data[0][1]
-                msg = email.message_from_bytes(raw)
-                                              de                                                                ad(self, msg_id: str):
-        with imaplib.IMAP4_SSL("imap.gmail.com") as imap:
-            imap.            imap.            imap.            
-            imap.select("INBOX")
-            imap.store(msg_id, "+FLAGS", "\\Seen")
+            server.login(self.assistant_email,             server.login(self.assistant_email,     .a            ser [t            server.login(self.assistant_email,      t             server.login(self.assistant_email,             server.log               server.login(self.assistant_email,             server.loas imap:
+            imap.login(self.assistant_email, self.app_password)
+            imap.select            imap.select            imap.select            imap.select            imap.select            imap.select            imap.select            imap.select            imap.select(m            imap.select                     imap.select            imap.select            imap.select            imap.select            imap.select            imap.select            imap.select            imap.select    ad            imap.select            imap.select            imap.select            imap.select  p.            imap.select            imap.select
+                                                              , "+FLAGS", "\\Seen")
 
-    def get_message(self, msg_id: str) -> dict    def get_message(self, msg_id: str) -> dict    def get_message(self, msg_id: str) -> dict    def get_message(self, msg_id: str) -> dict    def get_message(self, msg_id: str) -> dict    def getil.users().watch(
+    def get_message(self, msg_id: str) -> dict:
+        return self._gmail.users().messages().get(
+            userId="me", id=msg_id, format="full"
+        ).execute()
+
+    def setup_watch(self, topic: str) -> dict:
+        return self._gmail.users().watch(
             userId="me",
             body={"topicName": topic, "labelIds": ["INBOX"]},
         ).execute()
@@ -95,12 +83,11 @@ class GmailClient:
             "timeMin": start,
             "timeMax": end,
             "items": [{"id": e} for e in emails],
-        })        })        })        })        })        })        })        }ict) -> dict:
+        }).execute()
+
+    def create_event(self, organizer_email: str, event: dict) -> dict:
         if not self._calendar:
             return {"id": "no-calendar"}
         return self._calendar.events().insert(
             calendarId=organizer_email,
-            body=event,
-            sendUpdates="all",
-            conferenceDataVersion=1,
-        ).execute()
+            bod            bod            bod            bod            bod            bod          ).execute()
