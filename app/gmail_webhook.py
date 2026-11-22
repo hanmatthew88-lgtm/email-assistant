@@ -81,40 +81,7 @@ async def process_new_messages(client: GmailClient, start_history_id: str):
 
     records = history.get("history", [])
     if not records:
-        logger.info("No new messages in history — trying IMAP fallback")
-        try:
-            emails = await loop.run_in_executor(None, lambda: client.get_latest_emails(limit=5))
-            for item in emails:
-                msg = item["raw"]
-                from_addr = msg.get("From", "")
-                cc_raw = msg.get("Cc", "") or ""
-                cc_list = [a.strip().lower() for a in cc_raw.split(",") if a.strip()]
-                subject = msg.get("Subject", "")
-                assistant = client.assistant_email.lower()
-                if assistant not in cc_list:
-                    logger.info(f"Assistant not CC'd — skipping IMAP message")
-                    continue
-                logger.info(f"Processing via IMAP: {subject} from {from_addr}")
-                body_text = ""
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body_text = part.get_payload(decode=True).decode("utf-8", errors="ignore")
-                            break
-                else:
-                    body_text = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-                parsed = {
-                    "from": from_addr,
-                    "to": msg.get("To", ""),
-                    "cc": cc_list,
-                    "subject": subject,
-                    "body": body_text,
-                    "thread_id": "",
-                    "message_id": item["id"],
-                }
-                await handle_gmail_scheduling(client, parsed)
-        except Exception as e:
-            logger.error(f"IMAP fallback failed: {e}", exc_info=True)
+        logger.info("No new messages in history")
         return
 
     for record in records:
