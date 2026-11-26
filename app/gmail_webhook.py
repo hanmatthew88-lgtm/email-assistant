@@ -17,8 +17,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/gmail")
 
+# Single shared client instance
 _client: GmailClient = None
-_last_history_id: str = None
+# Track the last processed history ID per email address to avoid re-processing
+_last_history_ids: dict = {}
 
 
 def get_client() -> GmailClient:
@@ -30,10 +32,15 @@ def get_client() -> GmailClient:
 
 @router.post("/webhook")
 async def gmail_webhook(request: Request):
-    global _last_history_id
+    """
+    Google Pub/Sub pushes a POST here when a new email arrives.
+    The body contains a base64-encoded Gmail notification.
+    """
+    global _last_history_ids
 
     body = await request.json()
 
+    # Decode the Pub/Sub message
     pubsub_message = body.get("message", {})
     data_b64 = pubsub_message.get("data", "")
     if not data_b64:
@@ -45,11 +52,17 @@ async def gmail_webhook(request: Request):
 
     logger.info(f"Gmail notification for {email_address}, historyId: {history_id}")
 
-    start_id = _last_history_id or str(int(history_id) - 1)
-    _last_history_id = history_id
+    # Only process notifications for the assistant's own account
+    client = get_client()
+    if email_address and email_address.lower() != client.assistant_email.lower():
+        logger.info(f"Ignoring notification for {email_address} (not assistant account)")
+        return {"status": "ignored"}
+
+    # Use the previous history ID as startHistoryId so we get the new messages
+    start_id = _last_history_ids.get(email_address) or str(int(history_id) - 1)
+    _last_history_ids[email_address] = history_id
 
     try:
-        client = get_client()
         await process_new_messages(client, start_id)
     except Exception as e:
         logger.error(f"Error processing Gmail notification: {e}", exc_info=True)
@@ -58,10 +71,12 @@ async def gmail_webhook(request: Request):
 
 
 async def process_new_messages(client: GmailClient, start_history_id: str):
+    """
+    Fetch messages added since the last history ID and process each one.
+    """
     import asyncio
-    loop = asyncio.get_event_loop()
 
-    logger.info(f"Fetching history since ID: {start_history_id}")
+    loop = asyncio.get_event_loop()
 
     try:
         history = await loop.run_in_executor(
@@ -77,8 +92,6 @@ async def process_new_messages(client: GmailClient, start_history_id: str):
         logger.error(f"Failed to fetch history: {e}")
         return
 
-    logger.info(f"History response: {history}")
-
     records = history.get("history", [])
     if not records:
         logger.info("No new messages in history")
@@ -87,6 +100,8 @@ async def process_new_messages(client: GmailClient, start_history_id: str):
     for record in records:
         for added in record.get("messagesAdded", []):
             msg_id = added["message"]["id"]
+
+            # Skip messages sent BY the assistant (avoid loops)
             labels = added["message"].get("labelIds", [])
             if "SENT" in labels:
                 continue
@@ -96,6 +111,8 @@ async def process_new_messages(client: GmailClient, start_history_id: str):
                     None, lambda: client.get_message(msg_id)
                 )
                 parsed = parse_gmail_message(raw)
+
+                # Only act if assistant is CC'd, not the primary recipient
                 assistant = client.assistant_email.lower()
                 cc_list = [addr.lower() for addr in parsed.get("cc", [])]
                 if assistant not in cc_list:
@@ -111,7 +128,11 @@ async def process_new_messages(client: GmailClient, start_history_id: str):
 
 @router.post("/watch/setup")
 async def setup_watch():
-    topic = os.environ["PUBSUB_TOPIC"]
+    """
+    Register Gmail push notifications to your Pub/Sub topic.
+    Call once, then renew every 7 days (Gmail watch expires).
+    """
+    topic = os.environ["PUBSUB_TOPIC"]  # projects/{id}/topics/{name}
     client = get_client()
     result = client.setup_watch(topic)
     logger.info(f"Gmail watch set up: {result}")
