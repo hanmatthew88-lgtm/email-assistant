@@ -58,8 +58,9 @@ async def gmail_webhook(request: Request):
         logger.info(f"Ignoring notification for {email_address} (not assistant account)")
         return {"status": "ignored"}
 
-    # Use the previous history ID as startHistoryId so we get the new messages
-    start_id = _last_history_ids.get(email_address) or str(int(history_id) - 1)
+    # Use prev historyId only if it's older than current; otherwise look back 1
+    prev_id = _last_history_ids.get(email_address)
+    start_id = prev_id if prev_id and int(prev_id) < int(history_id) else str(int(history_id) - 1)
     _last_history_ids[email_address] = history_id
 
     try:
@@ -132,7 +133,7 @@ async def setup_watch():
     Register Gmail push notifications to your Pub/Sub topic.
     Call once, then renew every 7 days (Gmail watch expires).
     """
-    topic = os.environ["PUBSUB_TOPIC"]  # projects/{id}/topics/{name}
+    topic = os.environ["PUBSUB_TOPIC"]
     client = get_client()
     result = client.setup_watch(topic)
     logger.info(f"Gmail watch set up: {result}")
