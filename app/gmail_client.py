@@ -45,7 +45,7 @@ class GmailClient:
             logger.warning(f"Calendar not configured: {e}")
 
     def _build_gmail_api(self):
-        """Build Gmail API service using app password via OAuth2 credentials."""
+        """Build Gmail API service using OAuth2 credentials."""
         try:
             import json
             token_json = os.environ.get("GMAIL_TOKEN_JSON")
@@ -65,27 +65,29 @@ class GmailClient:
                 self._gmail = build("gmail", "v1", credentials=creds)
                 logger.info("Gmail API client built from GMAIL_TOKEN_JSON")
             else:
-                logger.warning("GMAIL_TOKEN_JSON not set — Gmail API features (watch, history) unavailable")
+                logger.warning("GMAIL_TOKEN_JSON not set — Gmail API features unavailable")
                 self._gmail = None
         except Exception as e:
             logger.warning(f"Gmail API not configured: {e}")
             self._gmail = None
 
     def send_reply(self, thread_id: str, to: str, subject: str, html_body: str):
-        """Send an HTML reply via Gmail SMTP."""
+        """Send an HTML reply via Gmail API (avoids SMTP port blocks on Render)."""
         msg = MIMEMultipart("alternative")
         msg["To"] = to
         msg["From"] = self.assistant_email
         msg["Subject"] = f"Re: {subject}" if not subject.lower().startswith("re:") else subject
-
+        if thread_id:
+            msg["References"] = thread_id
+            msg["In-Reply-To"] = thread_id
         msg.attach(MIMEText(html_body, "html"))
 
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(self.assistant_email, self.app_password)
-            server.sendmail(self.assistant_email, [to], msg.as_string())
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        body = {"raw": raw}
+        if thread_id:
+            body["threadId"] = thread_id
 
+        self._gmail.users().messages().send(userId="me", body=body).execute()
         logger.info(f"Reply sent to {to}")
 
     def get_latest_emails(self, limit: int = 10) -> list:
